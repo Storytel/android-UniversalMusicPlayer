@@ -45,7 +45,7 @@ android {
 }
 
 dependencies {
-    implementation project(':media')
+    implementation project(':audioplayer-service')
 
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 

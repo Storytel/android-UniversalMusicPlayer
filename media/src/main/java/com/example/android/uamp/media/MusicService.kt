@@ -27,28 +27,18 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.support.v4.app.NotificationManagerCompat
-import android.support.v4.media.AudioAttributesCompat
-import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.*
 import android.support.v4.media.MediaBrowserCompat.MediaItem
-import android.support.v4.media.MediaBrowserServiceCompat
-import android.support.v4.media.MediaDescriptionCompat
-import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import com.example.android.uamp.media.audiofocus.AudioFocusExoPlayerDecorator
 import com.example.android.uamp.media.extensions.flag
 import com.example.android.uamp.media.library.BrowseTree
-import com.example.android.uamp.media.library.JsonSource
 import com.example.android.uamp.media.library.MusicSource
 import com.example.android.uamp.media.library.UAMP_BROWSABLE_ROOT
 import com.example.android.uamp.media.library.UAMP_EMPTY_ROOT
-import com.google.android.exoplayer2.DefaultLoadControl
-import com.google.android.exoplayer2.DefaultRenderersFactory
-import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.ExoPlayerFactory
-import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.Timeline
+import com.google.android.exoplayer2.*
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import com.google.android.exoplayer2.ext.mediasession.TimelineQueueNavigator
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
@@ -66,7 +56,7 @@ import com.google.android.exoplayer2.util.Util
  * For more information on implementing a MediaBrowserService,
  * visit [https://developer.android.com/guide/topics/media-apps/audio-app/building-a-mediabrowserservice.html](https://developer.android.com/guide/topics/media-apps/audio-app/building-a-mediabrowserservice.html).
  */
-class MusicService : MediaBrowserServiceCompat() {
+abstract class MusicService : MediaBrowserServiceCompat() {
     private lateinit var mediaSession: MediaSessionCompat
     private lateinit var mediaController: MediaControllerCompat
     private lateinit var becomingNoisyReceiver: BecomingNoisyReceiver
@@ -143,7 +133,7 @@ class MusicService : MediaBrowserServiceCompat() {
         becomingNoisyReceiver =
                 BecomingNoisyReceiver(context = this, sessionToken = mediaSession.sessionToken)
 
-        mediaSource = JsonSource(context = this, source = remoteJsonSource)
+        mediaSource = createMediaSource()
 
         // ExoPlayer will manage the MediaSession for us.
         mediaSessionConnector = MediaSessionConnector(mediaSession).also {
@@ -163,6 +153,8 @@ class MusicService : MediaBrowserServiceCompat() {
 
         packageValidator = PackageValidator(this, R.xml.allowed_media_browser_callers)
     }
+
+    abstract fun createMediaSource() : MusicSource
 
     override fun onTaskRemoved(rootIntent: Intent) {
         super.onTaskRemoved(rootIntent)

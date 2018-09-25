@@ -32,6 +32,7 @@ import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.util.Log
 import com.example.android.uamp.media.audiofocus.AudioFocusExoPlayerDecorator
 import com.example.android.uamp.media.extensions.flag
 import com.example.android.uamp.media.library.BrowseTree
@@ -62,7 +63,7 @@ abstract class MusicService : MediaBrowserServiceCompat() {
     private lateinit var becomingNoisyReceiver: BecomingNoisyReceiver
     private lateinit var notificationManager: NotificationManagerCompat
     private lateinit var notificationBuilder: NotificationBuilder
-    private lateinit var mediaSource: MusicSource
+    protected lateinit var mediaSource: MusicSource
     private lateinit var mediaSessionConnector: MediaSessionConnector
     private lateinit var packageValidator: PackageValidator
 
@@ -80,20 +81,16 @@ abstract class MusicService : MediaBrowserServiceCompat() {
     private val remoteJsonSource: Uri =
             Uri.parse("https://storage.googleapis.com/uamp/catalog.json")
 
-    private val audioAttributes = AudioAttributesCompat.Builder()
-            .setContentType(AudioAttributesCompat.CONTENT_TYPE_MUSIC)
-            .setUsage(AudioAttributesCompat.USAGE_MEDIA)
-            .build()
+    private val audioAttributes =
+            AudioAttributesCompat.Builder().setContentType(AudioAttributesCompat.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributesCompat.USAGE_MEDIA).build()
 
     // Wrap a SimpleExoPlayer with a decorator to handle audio focus for us.
     private val exoPlayer: ExoPlayer by lazy {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        AudioFocusExoPlayerDecorator(audioAttributes,
-                audioManager,
-                ExoPlayerFactory.newSimpleInstance(
-                        DefaultRenderersFactory(this),
-                        DefaultTrackSelector(),
-                        DefaultLoadControl()))
+        AudioFocusExoPlayerDecorator(audioAttributes, audioManager,
+                ExoPlayerFactory.newSimpleInstance(DefaultRenderersFactory(this),
+                        DefaultTrackSelector(), DefaultLoadControl()))
     }
 
     override fun onCreate() {
@@ -104,11 +101,10 @@ abstract class MusicService : MediaBrowserServiceCompat() {
         val sessionActivityPendingIntent = PendingIntent.getActivity(this, 0, sessionIntent, 0)
 
         // Create a new MediaSession.
-        mediaSession = MediaSessionCompat(this, "MusicService")
-                .apply {
-                    setSessionActivity(sessionActivityPendingIntent)
-                    isActive = true
-                }
+        mediaSession = MediaSessionCompat(this, "MusicService").apply {
+            setSessionActivity(sessionActivityPendingIntent)
+            isActive = true
+        }
 
         /**
          * In order for [MediaBrowserCompat.ConnectionCallback.onConnected] to be called,
@@ -120,7 +116,6 @@ abstract class MusicService : MediaBrowserServiceCompat() {
          * [MediaBrowserCompat.ConnectionCallback.onConnectionFailed].)
          */
         sessionToken = mediaSession.sessionToken
-
         // Because ExoPlayer will manage the MediaSession, add the service as a callback for
         // state changes.
         mediaController = MediaControllerCompat(this, mediaSession).also {
@@ -138,14 +133,11 @@ abstract class MusicService : MediaBrowserServiceCompat() {
         // ExoPlayer will manage the MediaSession for us.
         mediaSessionConnector = MediaSessionConnector(mediaSession).also {
             // Produces DataSource instances through which media data is loaded.
-            val dataSourceFactory = DefaultDataSourceFactory(
-                    this, Util.getUserAgent(this, UAMP_USER_AGENT), null)
+            val dataSourceFactory =
+                    DefaultDataSourceFactory(this, Util.getUserAgent(this, UAMP_USER_AGENT), null)
 
             // Create the PlaybackPreparer of the media session connector.
-            val playbackPreparer = UampPlaybackPreparer(
-                    mediaSource,
-                    exoPlayer,
-                    dataSourceFactory)
+            val playbackPreparer = UampPlaybackPreparer(mediaSource, exoPlayer, dataSourceFactory)
 
             it.setPlayer(exoPlayer, playbackPreparer)
             it.setQueueNavigator(UampQueueNavigator(mediaSession))
@@ -154,7 +146,7 @@ abstract class MusicService : MediaBrowserServiceCompat() {
         packageValidator = PackageValidator(this, R.xml.allowed_media_browser_callers)
     }
 
-    abstract fun createMediaSource() : MusicSource
+    abstract fun createMediaSource(): MusicSource
 
     override fun onTaskRemoved(rootIntent: Intent) {
         super.onTaskRemoved(rootIntent)
@@ -172,8 +164,7 @@ abstract class MusicService : MediaBrowserServiceCompat() {
      * Returns the "root" media ID that the client should request to get the list of
      * [MediaItem]s to browse/play.
      */
-    override fun onGetRoot(clientPackageName: String,
-                           clientUid: Int,
+    override fun onGetRoot(clientPackageName: String, clientUid: Int,
                            rootHints: Bundle?): MediaBrowserServiceCompat.BrowserRoot? {
 
         if (packageValidator.isCallerAllowed(clientPackageName, clientUid)) {
@@ -198,9 +189,8 @@ abstract class MusicService : MediaBrowserServiceCompat() {
      * items of the provided [parentMediaId]. See [BrowseTree] for more details on
      * how this is build/more details about the relationships.
      */
-    override fun onLoadChildren(
-            parentMediaId: String,
-            result: MediaBrowserServiceCompat.Result<List<MediaItem>>) {
+    override fun onLoadChildren(parentMediaId: String,
+                                result: MediaBrowserServiceCompat.Result<List<MediaItem>>) {
 
         // If the media source is ready, the results will be set synchronously here.
         val resultsSent = mediaSource.whenReady { successfullyInitialized ->
@@ -259,7 +249,18 @@ abstract class MusicService : MediaBrowserServiceCompat() {
         }
 
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
-            state?.let { updateNotification(it) }
+            state?.let {
+                updateNotification(it)
+                handleOnPlaybackStateChanged(it)
+            }
+        }
+
+        /**
+         * Override to handle the session being destroyed. The session is no
+         * longer valid after this call and calls to it will be ignored.
+         */
+        override fun onSessionDestroyed() {
+            Log.d(TAG, "onSessionDestroyed")
         }
 
         private fun updateNotification(state: PlaybackStateCompat) {
@@ -276,8 +277,7 @@ abstract class MusicService : MediaBrowserServiceCompat() {
             }
 
             when (updatedState) {
-                PlaybackStateCompat.STATE_BUFFERING,
-                PlaybackStateCompat.STATE_PLAYING -> {
+                PlaybackStateCompat.STATE_BUFFERING, PlaybackStateCompat.STATE_PLAYING -> {
                     becomingNoisyReceiver.register()
 
                     startForeground(NOW_PLAYING_NOTIFICATION, notification)
@@ -300,19 +300,28 @@ abstract class MusicService : MediaBrowserServiceCompat() {
             }
         }
     }
+
+    abstract fun handleOnPlaybackStateChanged(state: PlaybackStateCompat)
+
+    fun getExoPlayerInstance(): ExoPlayer {
+        return exoPlayer
+    }
+
+    fun getMediaController() : MediaControllerCompat{
+        return mediaController
+    }
 }
 
 /**
  * Helper class to retrieve the the Metadata necessary for the ExoPlayer MediaSession connection
  * extension to call [MediaSessionCompat.setMetadata].
  */
-private class UampQueueNavigator(
-        mediaSession: MediaSessionCompat
-) : TimelineQueueNavigator(mediaSession) {
+private class UampQueueNavigator(mediaSession: MediaSessionCompat) :
+        TimelineQueueNavigator(mediaSession) {
     private val window = Timeline.Window()
     override fun getMediaDescription(player: Player, windowIndex: Int): MediaDescriptionCompat =
-            player.currentTimeline
-                    .getWindow(windowIndex, window, true).tag as MediaDescriptionCompat
+            player.currentTimeline.getWindow(windowIndex, window,
+                    true).tag as MediaDescriptionCompat
 }
 
 /**
@@ -320,8 +329,7 @@ private class UampQueueNavigator(
  * will otherwise cause playback to become "noisy").
  */
 private class BecomingNoisyReceiver(private val context: Context,
-                                    sessionToken: MediaSessionCompat.Token)
-    : BroadcastReceiver() {
+                                    sessionToken: MediaSessionCompat.Token) : BroadcastReceiver() {
 
     private val noisyIntentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
     private val controller = MediaControllerCompat(context, sessionToken)
@@ -348,5 +356,5 @@ private class BecomingNoisyReceiver(private val context: Context,
         }
     }
 }
-
+private const val TAG = "MusicService"
 private const val UAMP_USER_AGENT = "uamp.next"

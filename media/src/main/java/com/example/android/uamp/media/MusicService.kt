@@ -146,11 +146,25 @@ abstract class MusicService : MediaBrowserServiceCompat() {
         packageValidator = PackageValidator(this, R.xml.allowed_media_browser_callers)
     }
 
+
     abstract fun createMediaSource(): MusicSource
 
+    /**
+     * This is the code that causes UAMP to stop playing when swiping it away from recents.
+     * The choice to do this is app specific. Some apps stop playback, while others allow playback
+     * to continue and allow uses to stop it with the notification.
+     */
     override fun onTaskRemoved(rootIntent: Intent) {
         super.onTaskRemoved(rootIntent)
-        stopSelf()
+
+        /**
+         * By stopping playback, the player will transition to [Player.STATE_IDLE]. This will
+         * cause a state change in the MediaSession, and (most importantly) call
+         * [MediaControllerCallback.onPlaybackStateChanged]. Because the playback state will
+         * be reported as [PlaybackStateCompat.STATE_NONE], the service will first remove
+         * itself as a foreground service, and will then call [stopSelf].
+         */
+        exoPlayer.stop(true)
     }
 
     override fun onDestroy() {
@@ -167,7 +181,7 @@ abstract class MusicService : MediaBrowserServiceCompat() {
     override fun onGetRoot(clientPackageName: String, clientUid: Int,
                            rootHints: Bundle?): MediaBrowserServiceCompat.BrowserRoot? {
 
-        if (packageValidator.isCallerAllowed(clientPackageName, clientUid)) {
+        if (packageValidator.isKnownCaller(clientPackageName, clientUid)) {
             // The caller is allowed to browse, so return the root.
             return BrowserRoot(UAMP_BROWSABLE_ROOT, null)
         } else {
@@ -280,21 +294,36 @@ abstract class MusicService : MediaBrowserServiceCompat() {
                 PlaybackStateCompat.STATE_BUFFERING, PlaybackStateCompat.STATE_PLAYING -> {
                     becomingNoisyReceiver.register()
 
-                    startForeground(NOW_PLAYING_NOTIFICATION, notification)
-                    isForegroundService = true
+                    /**
+                     * This may look strange, but the documentation for [Service.startForeground]
+                     * notes that "calling this method does *not* put the service in the started
+                     * state itself, even though the name sounds like it."
+                     */
+                    if (!isForegroundService) {
+                        startService(Intent(applicationContext, this@MusicService.javaClass))
+                        startForeground(NOW_PLAYING_NOTIFICATION, notification)
+                        isForegroundService = true
+                    } else if (notification != null) {
+                        notificationManager.notify(NOW_PLAYING_NOTIFICATION, notification)
+                    }
                 }
                 else -> {
                     becomingNoisyReceiver.unregister()
 
                     if (isForegroundService) {
                         stopForeground(false)
+                        isForegroundService = false
+
+                        // If playback has ended, also stop the service.
+                        if (updatedState == PlaybackStateCompat.STATE_NONE) {
+                            stopSelf()
+                        }
 
                         if (notification != null) {
                             notificationManager.notify(NOW_PLAYING_NOTIFICATION, notification)
                         } else {
                             removeNowPlayingNotification()
                         }
-                        isForegroundService = false
                     }
                 }
             }
